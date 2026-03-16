@@ -15,6 +15,7 @@ Usage:
 import sys
 import math
 import argparse
+import importlib.metadata
 from typing import Any
 
 
@@ -22,10 +23,23 @@ from typing import Any
 def run_mcp_server():
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
-    from mcp.types import Tool, TextContent
+    from mcp.types import Tool, TextContent, ToolAnnotations
+    import mcp.shared.version as _mcp_version
     import asyncio
 
-    server = Server("finance-calculator")
+    _mcp_version.SUPPORTED_PROTOCOL_VERSIONS = ["2024-11-05"]
+
+    server = Server(
+        "finance-calculator",
+        version=importlib.metadata.version("finance-calc-mcp"),
+        instructions=(
+            "Business, financial, and tax calculator. Use these tools to evaluate math "
+            "expressions, compute gross margins, estimate US federal income tax, calculate "
+            "self-employment tax, generate depreciation schedules, summarize payroll costs, "
+            "amortize loans, compute percent changes, run break-even analyses, and format "
+            "currency values. All tools are read-only calculations with no side effects."
+        ),
+    )
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
@@ -45,7 +59,14 @@ def run_mcp_server():
                         "expression": {"type": "string", "description": "Math expression to evaluate"}
                     },
                     "required": ["expression"]
-                }
+                },
+                annotations=ToolAnnotations(
+                    title="Calculate Expression",
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
+                    openWorldHint=False,
+                ),
             ),
             Tool(
                 name="gross_margin",
@@ -57,7 +78,14 @@ def run_mcp_server():
                         "cogs":     {"type": "number", "description": "Cost of goods sold"}
                     },
                     "required": ["revenue", "cogs"]
-                }
+                },
+                annotations=ToolAnnotations(
+                    title="Gross Margin",
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
+                    openWorldHint=False,
+                ),
             ),
             Tool(
                 name="us_income_tax_estimate",
@@ -72,7 +100,14 @@ def run_mcp_server():
                         "filing_status":  {"type": "string", "description": "single | married_jointly | married_separately | head_of_household"}
                     },
                     "required": ["taxable_income", "filing_status"]
-                }
+                },
+                annotations=ToolAnnotations(
+                    title="US Income Tax Estimate",
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
+                    openWorldHint=False,
+                ),
             ),
             Tool(
                 name="self_employment_tax",
@@ -83,7 +118,14 @@ def run_mcp_server():
                         "net_self_employment_income": {"type": "number", "description": "Net profit from self-employment"}
                     },
                     "required": ["net_self_employment_income"]
-                }
+                },
+                annotations=ToolAnnotations(
+                    title="Self-Employment Tax",
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
+                    openWorldHint=False,
+                ),
             ),
             Tool(
                 name="depreciation",
@@ -97,7 +139,14 @@ def run_mcp_server():
                         "method":        {"type": "string",  "description": "straight_line | double_declining (default: straight_line)"}
                     },
                     "required": ["asset_cost", "useful_life"]
-                }
+                },
+                annotations=ToolAnnotations(
+                    title="Depreciation Schedule",
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
+                    openWorldHint=False,
+                ),
             ),
             Tool(
                 name="payroll_summary",
@@ -112,7 +161,14 @@ def run_mcp_server():
                         "state_suta_rate":     {"type": "number", "description": "State unemployment rate % (default 2.7)", "default": 2.7}
                     },
                     "required": ["gross_annual_salary"]
-                }
+                },
+                annotations=ToolAnnotations(
+                    title="Payroll Summary",
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
+                    openWorldHint=False,
+                ),
             ),
             Tool(
                 name="loan_amortization",
@@ -126,7 +182,14 @@ def run_mcp_server():
                         "show_schedule":  {"type": "boolean","description": "Return full amortization table (default false)"}
                     },
                     "required": ["principal", "annual_rate_pct", "term_years"]
-                }
+                },
+                annotations=ToolAnnotations(
+                    title="Loan Amortization",
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
+                    openWorldHint=False,
+                ),
             ),
             Tool(
                 name="percent_change",
@@ -138,7 +201,14 @@ def run_mcp_server():
                         "new_value": {"type": "number", "description": "Ending/new value"}
                     },
                     "required": ["old_value", "new_value"]
-                }
+                },
+                annotations=ToolAnnotations(
+                    title="Percent Change",
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
+                    openWorldHint=False,
+                ),
             ),
             Tool(
                 name="break_even",
@@ -151,7 +221,14 @@ def run_mcp_server():
                         "variable_cost_per_unit": {"type": "number", "description": "Variable cost per unit"}
                     },
                     "required": ["fixed_costs", "price_per_unit", "variable_cost_per_unit"]
-                }
+                },
+                annotations=ToolAnnotations(
+                    title="Break-Even Analysis",
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
+                    openWorldHint=False,
+                ),
             ),
             Tool(
                 name="currency_format",
@@ -163,7 +240,14 @@ def run_mcp_server():
                         "decimals": {"type": "integer","description": "Decimal places (default 2)"}
                     },
                     "required": ["amount"]
-                }
+                },
+                annotations=ToolAnnotations(
+                    title="Format Currency",
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
+                    openWorldHint=False,
+                ),
             ),
         ]
 

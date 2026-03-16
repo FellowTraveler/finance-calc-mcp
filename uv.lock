@@ -220,14 +220,14 @@ wheels = [
 
 [[package]]
 name = "finance-calc-mcp"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "mcp", specifier = ">=1.0.0" }]
+requires-dist = [{ name = "mcp", specifier = ">=1.0.0,<2.0.0" }]
 
 [[package]]
 name = "h11"
