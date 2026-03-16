@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "finance-calc-mcp"
+version = "0.1.0"
+description = "Business, financial, and tax calculator — MCP server + CLI"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = ["mcp>=1.0.0"]
+
+[project.scripts]
+finance-calc-mcp = "finance_calc_mcp.server:main"
