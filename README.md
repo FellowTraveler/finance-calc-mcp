@@ -21,12 +21,45 @@ uv tool install finance-calc-mcp
 
 ## Use as an MCP Server
 
+### Prerequisites
+
+Install [uv](https://docs.astral.sh/uv/) if you don't have it:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Restart your terminal after installing, then confirm `uvx` works:
+
+```bash
+uvx --version
+```
+
 ### Claude Desktop
 
 Edit your Claude Desktop config:
 
 - **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+**macOS:**
+
+```json
+{
+  "mcpServers": {
+    "finance-calculator": {
+      "command": "/bin/bash",
+      "args": ["-lc", "uvx finance-calc-mcp"]
+    }
+  }
+}
+```
+
+> Claude Desktop on macOS is a GUI app that doesn't inherit your shell PATH.
+> The `/bin/bash -lc` wrapper runs a login shell so `uvx` is found regardless
+> of where `uv` was installed.
+
+**Windows:**
 
 ```json
 {
