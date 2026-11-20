@@ -1,5 +1,9 @@
 # finance-calc-mcp — MCP Protocol Compliance & Visibility Fixes
 
+> Historical notes for 0.2.x, not current implementation instructions. Version
+> 0.3.0 restores SDK protocol negotiation to support structured results and tests
+> both modern clients and the 2024-11-05 protocol. The old pin below is superseded.
+
 ## Summary of Issues Found
 
 Inspected via MCP Inspector v0.15.0. The server's tools are fully correct and functional,

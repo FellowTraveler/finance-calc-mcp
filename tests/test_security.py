@@ -3,20 +3,24 @@ import math
 import subprocess
 import sys
 import unittest
+import json
+
+from jsonschema import validate
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from finance_calc_mcp.server import dispatch, safe_eval
+from finance_calc_mcp.calculations import calculate_result
 
 
 EXAMPLES = {
     "calculate": {"expression": "185000 * 0.21"},
     "gross_margin": {"revenue": 850000, "cogs": 612000},
-    "us_income_tax_estimate": {"taxable_income": 185000, "filing_status": "single"},
-    "self_employment_tax": {"net_self_employment_income": 95000},
+    "us_income_tax_estimate": {"taxable_income": 185000, "filing_status": "single", "tax_year": 2024},
+    "self_employment_tax": {"net_self_employment_income": 95000, "tax_year": 2026, "filing_status": "single"},
     "depreciation": {"asset_cost": 50000, "useful_life": 5},
-    "payroll_summary": {"gross_annual_salary": 95000},
+    "payroll_summary": {"gross_annual_salary": 95000, "tax_year": 2026},
     "loan_amortization": {"principal": 400000, "annual_rate_pct": 6.5, "term_years": 30},
     "percent_change": {"old_value": 1200000, "new_value": 1485000},
     "break_even": {"fixed_costs": 120000, "price_per_unit": 49.99, "variable_cost_per_unit": 18.50},
@@ -86,12 +90,30 @@ class MCPTests(unittest.TestCase):
                 async with ClientSession(read, write) as session:
                     init = await session.initialize()
                     self.assertEqual(init.serverInfo.name, "finance-calculator")
+                    self.assertNotEqual(init.protocolVersion, "2024-11-05")
                     tools = await session.list_tools()
                     self.assertEqual({tool.name for tool in tools.tools}, set(EXAMPLES))
+                    schemas = {tool.name: tool.outputSchema for tool in tools.tools}
                     for name, arguments in EXAMPLES.items():
                         result = await session.call_tool(name, arguments)
                         self.assertFalse(result.isError, result)
                         self.assertTrue(result.content)
+                        self.assertEqual(result.structuredContent, calculate_result(name, arguments))
+                        validate(result.structuredContent, schemas[name])
+                        json.dumps(result.structuredContent, allow_nan=False)
+                    for name, arguments in [
+                        ("self_employment_tax", {**EXAMPLES["self_employment_tax"],
+                            "filing_status": "married_jointly", "medicare_wages": 200000,
+                            "spouse_net_self_employment_income": 50000}),
+                        ("payroll_summary", {**EXAMPLES["payroll_summary"], "state_suta_wage_base": 15000,
+                            "state_suta_rate": 3.4, "futa_credit_pct": 5.1}),
+                        ("loan_amortization", {**EXAMPLES["loan_amortization"], "show_schedule": True}),
+                        ("percent_change", {"old_value": 0, "new_value": 100}),
+                    ]:
+                        result = await session.call_tool(name, arguments)
+                        self.assertFalse(result.isError, result)
+                        self.assertEqual(result.structuredContent, calculate_result(name, arguments))
+                        validate(result.structuredContent, schemas[name])
                     for name, arguments in [
                         ("calculate", {"expression": "().__class__.__base__.__subclasses__()"}),
                         ("calculate", {"expression": "2**1000000000"}),
@@ -99,12 +121,53 @@ class MCPTests(unittest.TestCase):
                         ("currency_format", {"amount": 1, "decimals": 1000000000}),
                         ("depreciation", {"asset_cost": 1, "useful_life": 1000000000}),
                         ("loan_amortization", {**EXAMPLES["loan_amortization"], "term_years": 1000000000}),
+                        ("us_income_tax_estimate", {"taxable_income": 100, "filing_status": "single"}),
+                        ("self_employment_tax", {"net_self_employment_income": 95000, "tax_year": 2026}),
+                        ("payroll_summary", {"gross_annual_salary": 100, "tax_year": 2027}),
+                        ("gross_margin", {"revenue": 100, "cogs": 10, "unexpected": 1}),
                     ]:
                         result = await session.call_tool(name, arguments)
                         self.assertTrue(result.isError, result)
                     result = await session.call_tool("calculate", {"expression": "2+2"})
                     self.assertFalse(result.isError)
                     self.assertIn("4.00", result.content[0].text)
+
+        asyncio.run(asyncio.wait_for(exercise(), timeout=30))
+
+    def test_legacy_protocol_still_receives_readable_text(self):
+        async def exercise():
+            process = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "finance_calc_mcp.server",
+                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+
+            async def send(message, reply=True):
+                process.stdin.write((json.dumps(message) + "\n").encode())
+                await process.stdin.drain()
+                if reply:
+                    return json.loads(await asyncio.wait_for(process.stdout.readline(), timeout=10))
+
+            try:
+                init = await send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                    "protocolVersion": "2024-11-05", "capabilities": {},
+                    "clientInfo": {"name": "legacy-test", "version": "1.0"},
+                }})
+                self.assertEqual(init["result"]["protocolVersion"], "2024-11-05")
+                await send({"jsonrpc": "2.0", "method": "notifications/initialized"}, reply=False)
+                response = await send({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+                    "name": "us_income_tax_estimate", "arguments": EXAMPLES["us_income_tax_estimate"],
+                }})
+                self.assertFalse(response["result"].get("isError", False))
+                self.assertIn("37,442.50", response["result"]["content"][0]["text"])
+                self.assertIn("2024", response["result"]["content"][0]["text"])
+            finally:
+                process.stdin.close()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    process.kill()
+                    await process.wait()
 
         asyncio.run(asyncio.wait_for(exercise(), timeout=30))
 

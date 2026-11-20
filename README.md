@@ -1,299 +1,214 @@
 # finance-calc-mcp
 
-Business, financial, and tax calculator — MCP server + CLI.
+Local business and financial calculator: ten read-only MCP tools, also available
+as CLI commands. No bank connections, market-data requests, or stored financial
+records. Requires Python 3.10+ and an MCP client that can launch stdio servers.
 
-Single command install. No cloning required.
-
----
-
-## Install
+## Install and run
 
 ```bash
-# Run directly (no install needed)
-uvx finance-calc-mcp calc "185000 * 0.21"
+# Run without a permanent installation (uv must be installed)
+uvx --upgrade 'finance-calc-mcp>=0.3.0' calc '185000 * 0.21'
 
-# Or install permanently
+# Or install / upgrade a persistent command
 uv tool install finance-calc-mcp
-# or: pip install finance-calc-mcp
-```
-
----
-
-## Use as an MCP Server
-
-### Security update (0.2.1)
-
-Version 0.2.1 replaces Python expression execution with a restricted math
-interpreter, bounds calculation/output sizes, and updates vulnerable dependencies.
-Older releases should be upgraded once 0.2.1 is published:
-
-```bash
 uv tool upgrade finance-calc-mcp
-# or: pip install --upgrade 'finance-calc-mcp>=0.2.1'
-
-# Refresh uvx's cached environment, including dependencies
-uvx --upgrade 'finance-calc-mcp>=0.2.1' calc "185000 * 0.21"
+# Alternative: pip install --upgrade finance-calc-mcp
 ```
 
-For MCP configurations, use `uvx --upgrade 'finance-calc-mcp>=0.2.1'`
-(JSON args: `["--upgrade", "finance-calc-mcp>=0.2.1"]`), then restart the client.
-Until the release is published, maintainers can test this checkout with
-`uv run --locked finance-calc-mcp`.
+Install uv from its [official instructions](https://docs.astral.sh/uv/getting-started/installation/).
 
-### Prerequisites
+## Connect an MCP client
 
-Install [uv](https://docs.astral.sh/uv/) if you don't have it:
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-Restart your terminal after installing, then confirm `uvx` works:
-
-```bash
-uvx --version
-```
-
-### Claude Desktop
-
-Edit your Claude Desktop config:
-
-- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
-
-**macOS:**
-
-```json
-{
-  "mcpServers": {
-    "finance-calculator": {
-      "command": "/bin/bash",
-      "args": ["-lc", "uvx finance-calc-mcp"]
-    }
-  }
-}
-```
-
-> Claude Desktop on macOS is a GUI app that doesn't inherit your shell PATH.
-> The `/bin/bash -lc` wrapper runs a login shell so `uvx` is found regardless
-> of where `uv` was installed.
-
-**Windows:**
+Configure your client's local MCP server command as `uvx`, with arguments
+`["--upgrade", "finance-calc-mcp>=0.3.0"]`. For clients using JSON configuration:
 
 ```json
 {
   "mcpServers": {
     "finance-calculator": {
       "command": "uvx",
-      "args": ["finance-calc-mcp"]
+      "args": ["--upgrade", "finance-calc-mcp>=0.3.0"]
     }
   }
 }
 ```
 
-Restart Claude Desktop. The finance tools will appear automatically.
+If a desktop app cannot find `uvx`, replace `command` with the absolute path
+reported by `command -v uvx` (macOS/Linux) or `where uvx` (Windows). Restart the
+client after configuring or upgrading it. No arguments starts the stdio server;
+there is no HTTP listener.
 
-### Claude Code (terminal)
+For Claude Code:
 
 ```bash
-claude mcp add finance-calculator -- uvx finance-calc-mcp
+claude mcp add finance-calculator -- uvx --upgrade 'finance-calc-mcp>=0.3.0'
 ```
 
-### Other MCP Clients
+Example prompts:
 
-Any MCP-compatible client can launch the server:
+- “Revenue is $850,000 and COGS is $612,000. Calculate margin and markup.”
+- “Compare a $400,000 loan at 6.5% over 15 and 30 years.”
+- “Estimate 2026 ordinary federal income tax on $185,000 of taxable income,
+  filing single. Show the assumptions.”
+
+The assistant receives both readable text and structured results. Values passed
+through an AI client are also handled by that client and its provider.
+
+## Migrating from 0.2.x to 0.3.0
+
+- **Tax and payroll calls now require `tax_year`**: 2024, 2025, or 2026. CLI commands
+  require `--tax-year`. There is no clock-dependent default or fallback for an
+  unsupported year, including 2027.
+- **Self-employment tax requires `filing_status`** (CLI `--filing-status`). Regular
+  individual SE tax and return-level Additional Medicare Tax are separate results.
+  Do not interpret the regular SE tax as the complete tax on all income.
+- The double-declining depreciation method now switches to straight line when
+  appropriate and reconciles to salvage. It is book depreciation, not MACRS.
+- Loan totals sum rounded actual payments; the final payment may differ from the
+  regular monthly payment. This can change totals from earlier unrounded estimates.
+- Undefined percentages are `null` in structured output and `undefined` in text.
+- Numeric inputs must be finite; invalid or unknown arguments return errors.
+  Financial inputs are bounded to magnitude $1 trillion (general math expressions
+  have separate limits). Existing tool names and CLI command names remain available.
+- The SDK now negotiates protocol versions normally. Modern clients receive
+  structured content; readable text remains available to older clients.
+
+## Tools and inputs
+
+Amounts are USD. Unless noted, monetary inputs must be nonnegative. Filing status
+is `single`, `married_jointly`, `married_separately`, or `head_of_household`.
+Qualifying surviving spouse is not currently a supported input status.
+
+| Tool | Required inputs | Optional inputs |
+|---|---|---|
+| `calculate` | `expression` | — |
+| `gross_margin` | `revenue`, `cogs` | — |
+| `us_income_tax_estimate` | `taxable_income`, `filing_status`, `tax_year` | — |
+| `self_employment_tax` | `net_self_employment_income`, `filing_status`, `tax_year` | `social_security_wages=0`, `medicare_wages=0`, `spouse_net_self_employment_income=0` |
+| `payroll_summary` | `gross_annual_salary`, `tax_year` | `state_suta_rate=2.7`, `state_suta_wage_base=7000`, `futa_credit_pct=5.4` |
+| `depreciation` | `asset_cost`, `useful_life` | `salvage_value=0`, `method="straight_line"` |
+| `loan_amortization` | `principal`, `annual_rate_pct`, `term_years` | `show_schedule=false` |
+| `percent_change` | `old_value`, `new_value` | — |
+| `break_even` | `fixed_costs`, `price_per_unit`, `variable_cost_per_unit` | — |
+| `currency_format` | `amount` | `decimals=2` |
+
+### Tax estimates
+
+`us_income_tax_estimate` applies ordinary-income rate schedules to **taxable
+income after deductions**, before credits. It does not compute deductions, QBI,
+credits, capital-gain rates, AMT, NIIT, or state taxes. It uses rate schedules rather
+than the IRS tax-table income bands used for some returns. It returns bracket
+amounts, tax, effective rate, selected year, assumptions, and source URLs.
+
+`self_employment_tax` uses the normal Schedule SE method. Profit/loss is combined
+for this individual; negative net profit produces zero taxable SE earnings. The
+$400 minimum applies after the 92.35% adjustment. It excludes optional methods,
+church employee rules, and special exemptions.
+
+- `social_security_wages`: this individual's Social Security wages/tips, reducing
+  the remaining annual cap. Do not include spouse wages.
+- `medicare_wages`: total Medicare wages for the return, **including both spouses
+  for married filing jointly**. Supply independently of Social Security wages.
+- `spouse_net_self_employment_income`: spouse net business profit/loss, allowed
+  only for joint returns. Each spouse's earnings threshold is applied separately;
+  a loss by one spouse does not offset the other's SE earnings.
+- `regular_self_employment_tax` and `deductible_half` concern this individual only.
+  Spouse regular SE tax is excluded. Additional Medicare Tax is reported separately
+  for wages and combined SE earnings at the return level, before withholding
+  credits. Additional Medicare Tax is excluded from the deductible half.
+
+Tax data is reviewed and versioned locally; there are no live tax lookups during
+calculations. See [tax sources and annual review procedure](TAX_DATA.md).
+
+### Payroll estimates
+
+`payroll_summary` models one employee at one employer over a full calendar year,
+assuming the supplied salary is taxable for all modeled taxes. It reports FICA
+withholding, **pay after FICA before income tax and other deductions**, and employer
+costs. It excludes income-tax withholding, benefits, and other deductions.
+
+Additional Medicare **withholding** starts at $200,000 regardless of filing status;
+this is not the employee's final return-level tax liability and has no employer
+match. SUTA rate and wage base are explicit user assumptions, not state-specific
+data. The default FUTA credit is 5.4 percentage points, assuming full eligibility;
+set `futa_credit_pct` to the actual allowable credit, including reductions.
+
+### Schedules, arithmetic, and rounding
+
+Financial calculations use decimal arithmetic. Monetary inputs and tax/schedule
+line items round to cents using **ROUND_HALF_UP**. Totals sum the rounded line
+items. Percentages and fractional break-even units display four decimal places.
+Structured decimal values are strings to preserve precision; counts are integers.
+
+Loans use a fixed nominal annual percentage rate divided by 12, monthly payments
+in arrears, no fees, and no extra payments. Monthly interest and regular payments
+round to cents; the last payment clears the remaining balance. A very small loan
+may have a zero rounded regular payment and a nonzero final payment. Principal
+must be at least $0.01, APR is 0–100%, and term is 1–100 whole years.
+
+Depreciation uses full years (1–100). Salvage must be between zero and cost. Methods
+are `straight_line` and `double_declining`; the latter uses a remaining-life
+straight-line switch when larger, with the last year reconciled to salvage.
+Schedules do not implement tax depreciation conventions, MACRS, Section 179,
+or bonus depreciation.
+
+`percent_change` uses `(new - old) / old * 100`, retaining the signed denominator
+for negative starting values. A zero starting value gives an undefined percentage.
+Margin and markup likewise return undefined for a zero denominator.
+
+`calculate` uses bounded floating-point math, not decimal monetary arithmetic.
+It supports `+`, `-`, `*`, `/`, `**`, `%`, parentheses, `pi`, `e`, and `round`, `abs`,
+`max`, `min`, `sum`, `sqrt`, `log`, `floor`, `ceil`, and two-argument `pow`.
+Numeric lists/tuples work with aggregates, e.g. `sum([1, 2, 3])`. No attributes,
+indexing, comprehensions, strings, or arbitrary Python calls are executed.
+Limits: 4,096 characters, 256 syntax-tree nodes, 32 nesting levels, and finite
+real intermediates/results. Currency formatting allows 0–20 decimal places.
+
+## CLI examples
+
+Every command accepts `--json` for the same structured result returned by MCP.
 
 ```bash
-uvx finance-calc-mcp
-```
-
-With no arguments, it starts in MCP server mode (stdio transport).
-
----
-
-## MCP Tools
-
-When connected as an MCP server, Claude gets these tools:
-
-### `calculate`
-
-Evaluate a financial/business math expression. Supports `+`, `-`, `*`, `/`, `**`, `%`, parentheses, and functions: `round()`, `abs()`, `max()`, `min()`, `sum()`, `sqrt()`, `log()`, `floor()`, `ceil()`, `pow()`.
-
-Expressions may use `pi`, `e`, and numeric lists/tuples for aggregate functions
-(for example, `sum([1, 2, 3])`). `pow()` accepts two arguments. Python attributes,
-indexing, comprehensions, strings, and arbitrary function calls are rejected.
-Expressions are limited to 4,096 characters, 256 syntax-tree nodes, and 32 nesting
-levels; results and intermediate numbers must be finite real numbers.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `expression` | string | yes | Math expression to evaluate |
-
-### `gross_margin`
-
-Calculate gross margin, gross profit, and markup from revenue and COGS.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `revenue` | number | yes | Total revenue |
-| `cogs` | number | yes | Cost of goods sold |
-
-### `us_income_tax_estimate`
-
-Estimate 2024 US federal income tax for individuals, with bracket-by-bracket detail.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `taxable_income` | number | yes | Taxable income in USD |
-| `filing_status` | string | yes | `single`, `married_jointly`, `married_separately`, or `head_of_household` |
-
-### `self_employment_tax`
-
-Calculate self-employment (SE) tax and deductible half for Schedule SE. Covers Social Security, Medicare, and the additional Medicare surtax above $200k.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `net_self_employment_income` | number | yes | Net profit from self-employment |
-
-### `depreciation`
-
-Calculate a depreciation schedule (straight-line or double-declining balance).
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `asset_cost` | number | yes | Asset purchase price |
-| `useful_life` | integer | yes | Useful life in years (1–100) |
-| `salvage_value` | number | no | Salvage/residual value (default 0) |
-| `method` | string | no | `straight_line` (default) or `double_declining` |
-
-### `payroll_summary`
-
-Estimate employer payroll costs and employee net pay for a given gross salary. Covers FICA (Social Security + Medicare), FUTA, and SUTA.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `gross_annual_salary` | number | yes | Annual gross salary |
-| `state_suta_rate` | number | no | State unemployment rate % (default 2.7) |
-
-### `loan_amortization`
-
-Generate a loan amortization summary: monthly payment, total interest paid, and optionally a full month-by-month schedule.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `principal` | number | yes | Loan principal |
-| `annual_rate_pct` | number | yes | Annual interest rate as percent (e.g. 6.5) |
-| `term_years` | integer | yes | Loan term in years (1–100) |
-| `show_schedule` | boolean | no | Return full amortization table (default false) |
-
-### `percent_change`
-
-Calculate percent change between two values.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `old_value` | number | yes | Starting/original value |
-| `new_value` | number | yes | Ending/new value |
-
-### `break_even`
-
-Calculate break-even units and revenue given fixed costs, price per unit, and variable cost per unit.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `fixed_costs` | number | yes | Total fixed costs |
-| `price_per_unit` | number | yes | Selling price per unit |
-| `variable_cost_per_unit` | number | yes | Variable cost per unit |
-
-### `currency_format`
-
-Format a number as a USD currency string.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `amount` | number | yes | Amount to format |
-| `decimals` | integer | no | Decimal places, 0–20 (default 2) |
-
----
-
-## CLI Usage
-
-Every MCP tool is also available as a CLI command.
-
-```bash
-# Evaluate any expression
-finance-calc-mcp calc "185000 * 0.21"
-finance-calc-mcp calc "(850000 - 612000) / 850000 * 100"
-
-# Gross margin
+finance-calc-mcp calc '185000 * 0.21'
 finance-calc-mcp margin 850000 612000
-
-# 2024 US federal income tax estimate
-finance-calc-mcp tax 185000 single
-finance-calc-mcp tax 320000 married_jointly
-
-# Self-employment tax
-finance-calc-mcp se-tax 95000
-
-# Loan amortization (add --schedule for full table)
-finance-calc-mcp amortize 400000 6.5 30
+finance-calc-mcp tax 185000 single --tax-year 2026 --json
+finance-calc-mcp tax 185000 single --tax-year 2024
+finance-calc-mcp se-tax 95000 --tax-year 2026 --filing-status single
+finance-calc-mcp se-tax 100000 --tax-year 2026 --filing-status married_jointly \
+  --social-security-wages 150000 --medicare-wages 250000 \
+  --spouse-net-self-employment-income 50000
+finance-calc-mcp payroll 95000 3.4 --tax-year 2026 \
+  --state-suta-wage-base 15000 --futa-credit-pct 5.1
 finance-calc-mcp amortize 400000 6.5 30 --schedule
-
-# Payroll (optional: state SUTA rate %)
-finance-calc-mcp payroll 95000
-finance-calc-mcp payroll 95000 3.4
-
-# Depreciation (straight-line default, or double_declining)
-finance-calc-mcp depreciation 50000 5
 finance-calc-mcp depreciation 50000 5 5000 --method double_declining
-
-# Break-even analysis
 finance-calc-mcp break-even 120000 49.99 18.50
-
-# Percent change
 finance-calc-mcp pct-change 1200000 1485000
-
-# Format as currency
-finance-calc-mcp format 1234567.89
+finance-calc-mcp format 1234567.89 --decimals 2
 ```
 
-### Example Output
+## Structured results
 
-```
-$ finance-calc-mcp tax 185000 single
+Every successful result contains `tool`, `tax_year` (null for nontax tools),
+`inputs`, `results`, `assumptions`, `sources`, and `data_reviewed_on` (null when
+there is no tax data). Schedules and brackets are arrays in `results`.
 
-2024 Federal Income Tax Estimate (single)
-Taxable Income:   $185,000.00
-Federal Tax:      $37,442.50
-Effective Rate:   20.24%
+For example, `finance-calc-mcp margin 850000 612000 --json` returns these result
+fields (within the full envelope):
 
-Bracket Detail:
-  10%  $0.00 – $11,600.00:  $11,600.00 taxed → $1,160.00
-  12%  $11,600.00 – $47,150.00:  $35,550.00 taxed → $4,266.00
-  22%  $47,150.00 – $100,525.00:  $53,375.00 taxed → $11,742.50
-  24%  $100,525.00 – $191,950.00:  $84,475.00 taxed → $20,274.00
-```
-
-```
-$ finance-calc-mcp amortize 400000 6.5 30
-
-Loan Amortization Summary
-Principal:       $400,000.00
-Rate:            6.500% APR
-Term:            30 years (360 months)
-Monthly Payment: $2,528.27
-Total Paid:      $910,177.52
-Total Interest:  $510,177.52
-Interest/Dollar: 127.54%
+```json
+{
+  "gross_profit": "238000.00",
+  "gross_margin_pct": "28.0000",
+  "markup_pct": "38.8889"
+}
 ```
 
----
+MCP errors set `isError=true`. CLI errors write a concise message to stderr and
+exit nonzero. Text layout is intended for people; integrations should consume
+structured content or `--json`.
 
-## License
-
-MIT
-
-## Development checks
+## Development and release
 
 ```bash
 uv sync --locked
@@ -303,25 +218,25 @@ uvx pip-audit -r /tmp/finance-calc-requirements.txt --no-deps --disable-pip
 uv build
 ```
 
-CI runs tests and dependency audits on Python 3.10 and 3.14 on pushes, pull
-requests, and weekly. Dependabot checks the uv lockfile and GitHub Actions weekly.
-Dependency security floors in `pyproject.toml` protect published installs;
-`uv.lock` records the tested versions for source checkouts. Keep both updated.
-The server uses stdio only; it does not expose an HTTP endpoint.
+CI tests and audits dependencies on Python 3.10 and 3.14 on pushes, pull requests,
+and weekly. Tests cover independent IRS bracket anchors, tax thresholds, schedule
+reconciliation, input rejection, CLI use, and modern/legacy stdio connections.
+Dependabot checks uv and GitHub Actions weekly. Keep security floors in
+`pyproject.toml` and the tested dependency versions in `uv.lock` up to date.
 
-### Publishing a release
-
-The `Publish to PyPI` workflow builds and audits a version tag, then publishes
-the distributions using PyPI trusted publishing. Its publishing job uses the
-GitHub environment `pypi`; no long-lived API token is needed.
-
-Configure the project's PyPI trusted publisher with owner `FellowTraveler`,
-repository `finance-calc-mcp`, workflow `publish.yml`, and environment `pypi`.
-After CI passes, create and push a tag matching the package version, then run:
+The `Publish to PyPI` workflow builds, tests, and audits a version tag, then uses
+trusted publishing with the GitHub environment `pypi`. Configure the PyPI trusted
+publisher for owner `FellowTraveler`, repository `finance-calc-mcp`, workflow
+`publish.yml`, and environment `pypi`. After CI passes, push a tag matching the
+package version and run:
 
 ```bash
-gh workflow run publish.yml -f tag=v0.2.1
+gh workflow run publish.yml -f tag=v0.3.0
 ```
 
-Verify the workflow succeeds and the new version is available on PyPI before
-announcing the release.
+Verify PyPI availability and test a fresh installation before publishing the
+GitHub release announcement.
+
+## License
+
+MIT
