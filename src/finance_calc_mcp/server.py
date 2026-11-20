@@ -16,14 +16,22 @@ import sys
 import math
 import argparse
 import importlib.metadata
+import ast
+import operator
 from typing import Any
+
+MAX_EXPRESSION_LENGTH = 4096
+MAX_EXPRESSION_NODES = 256
+MAX_EXPRESSION_DEPTH = 32
+MAX_SCHEDULE_YEARS = 100
+MAX_DECIMALS = 20
 
 
 # ── MCP imports (only needed in server mode) ──────────────────────────────────
 def run_mcp_server():
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
-    from mcp.types import Tool, TextContent, ToolAnnotations
+    from mcp.types import Tool, TextContent, ToolAnnotations, CallToolResult
     import mcp.shared.version as _mcp_version
     import asyncio
 
@@ -56,7 +64,7 @@ def run_mcp_server():
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "expression": {"type": "string", "description": "Math expression to evaluate"}
+                        "expression": {"type": "string", "maxLength": MAX_EXPRESSION_LENGTH, "description": "Math expression to evaluate"}
                     },
                     "required": ["expression"]
                 },
@@ -134,7 +142,7 @@ def run_mcp_server():
                     "type": "object",
                     "properties": {
                         "asset_cost":    {"type": "number", "description": "Asset purchase price"},
-                        "useful_life":   {"type": "number", "description": "Useful life in years"},
+                        "useful_life":   {"type": "integer", "minimum": 1, "maximum": MAX_SCHEDULE_YEARS, "description": "Useful life in years"},
                         "salvage_value": {"type": "number", "description": "Salvage/residual value (default 0)", "default": 0},
                         "method":        {"type": "string",  "description": "straight_line | double_declining (default: straight_line)"}
                     },
@@ -178,7 +186,7 @@ def run_mcp_server():
                     "properties": {
                         "principal":      {"type": "number", "description": "Loan principal"},
                         "annual_rate_pct":{"type": "number", "description": "Annual interest rate as percent (e.g. 6.5)"},
-                        "term_years":     {"type": "number", "description": "Loan term in years"},
+                        "term_years":     {"type": "integer", "minimum": 1, "maximum": MAX_SCHEDULE_YEARS, "description": "Loan term in years"},
                         "show_schedule":  {"type": "boolean","description": "Return full amortization table (default false)"}
                     },
                     "required": ["principal", "annual_rate_pct", "term_years"]
@@ -237,7 +245,7 @@ def run_mcp_server():
                     "type": "object",
                     "properties": {
                         "amount":   {"type": "number", "description": "Amount to format"},
-                        "decimals": {"type": "integer","description": "Decimal places (default 2)"}
+                        "decimals": {"type": "integer", "minimum": 0, "maximum": MAX_DECIMALS, "description": "Decimal places (default 2)"}
                     },
                     "required": ["amount"]
                 },
@@ -252,12 +260,12 @@ def run_mcp_server():
         ]
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
+    async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent] | CallToolResult:
         try:
             result = dispatch(name, arguments)
             return [TextContent(type="text", text=result)]
         except Exception as e:
-            return [TextContent(type="text", text=f"Error: {e}")]
+            return CallToolResult(isError=True, content=[TextContent(type="text", text=f"Error: {e}")])
 
     async def _run():
         async with stdio_server() as (read_stream, write_stream):
@@ -270,23 +278,64 @@ def run_mcp_server():
 
 def fmt(n: float, decimals: int = 2) -> str:
     """Format number with commas and fixed decimals."""
+    decimals = bounded_integer(decimals, "decimals", 0, MAX_DECIMALS)
     return f"{n:,.{decimals}f}"
 
 
+def bounded_integer(value: Any, name: str, minimum: int, maximum: int) -> int:
+    if (type(value) not in (int, float) or not math.isfinite(value)
+            or value != int(value) or not minimum <= value <= maximum):
+        raise ValueError(f"{name} must be an integer between {minimum} and {maximum}")
+    return int(value)
+
+
 def safe_eval(expr: str) -> float:
-    """Safely evaluate a math expression."""
-    allowed = {
-        "__builtins__": {},
+    """Interpret a bounded numeric AST; never execute Python user code."""
+    if not isinstance(expr, str) or len(expr) > MAX_EXPRESSION_LENGTH:
+        raise ValueError(f"Expression must be a string of at most {MAX_EXPRESSION_LENGTH} characters")
+    functions = {
         "round": round, "abs": abs, "max": max, "min": min,
         "sum": sum, "sqrt": math.sqrt, "log": math.log,
-        "floor": math.floor, "ceil": math.ceil, "pow": pow,
-        "pi": math.pi, "e": math.e,
+        "floor": math.floor, "ceil": math.ceil, "pow": math.pow,
     }
+    binary = {ast.Add: operator.add, ast.Sub: operator.sub,
+              ast.Mult: operator.mul, ast.Div: operator.truediv,
+              ast.Mod: operator.mod, ast.Pow: math.pow}
+
+    def number(value):
+        if type(value) not in (int, float) or not math.isfinite(value):
+            raise ValueError("Only finite real numbers are supported")
+        return value
+
+    def visit(node, depth=0):
+        if depth > MAX_EXPRESSION_DEPTH:
+            raise ValueError("Expression is too deeply nested")
+        if isinstance(node, ast.Constant):
+            return number(node.value)
+        if isinstance(node, ast.Name) and node.id in ("pi", "e"):
+            return getattr(math, node.id)
+        if isinstance(node, ast.UnaryOp) and type(node.op) in (ast.UAdd, ast.USub):
+            value = number(visit(node.operand, depth + 1))
+            return value if isinstance(node.op, ast.UAdd) else -value
+        if isinstance(node, ast.BinOp) and type(node.op) in binary:
+            left = number(visit(node.left, depth + 1))
+            right = number(visit(node.right, depth + 1))
+            return number(binary[type(node.op)](left, right))
+        if isinstance(node, (ast.List, ast.Tuple)):
+            return [number(visit(item, depth + 1)) for item in node.elts]
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in functions and not node.keywords):
+            args = [visit(arg, depth + 1) for arg in node.args]
+            return number(functions[node.func.id](*args))
+        raise ValueError("Unsupported expression syntax")
+
     try:
-        result = eval(compile(expr, "<expr>", "eval"), allowed)  # noqa: S307
-        return float(result)
-    except Exception as exc:
-        raise ValueError(f"Cannot evaluate '{expr}': {exc}") from exc
+        tree = ast.parse(expr.strip(), mode="eval")
+        if sum(1 for _ in ast.walk(tree)) > MAX_EXPRESSION_NODES:
+            raise ValueError("Expression is too complex")
+        return float(number(visit(tree.body)))
+    except (ValueError, TypeError, ArithmeticError, SyntaxError, RecursionError) as exc:
+        raise ValueError(f"Cannot evaluate expression: {exc}") from exc
 
 
 # 2024 US Federal Income Tax Brackets
@@ -393,7 +442,7 @@ def dispatch(name: str, args: dict) -> str:
 
     elif name == "depreciation":
         cost = float(args["asset_cost"])
-        life = int(args["useful_life"])
+        life = bounded_integer(args["useful_life"], "useful_life", 1, MAX_SCHEDULE_YEARS)
         salvage = float(args.get("salvage_value", 0))
         method = args.get("method", "straight_line")
         depreciable = cost - salvage
@@ -451,7 +500,7 @@ def dispatch(name: str, args: dict) -> str:
     elif name == "loan_amortization":
         principal = float(args["principal"])
         annual_rate = float(args["annual_rate_pct"]) / 100
-        years = int(args["term_years"])
+        years = bounded_integer(args["term_years"], "term_years", 1, MAX_SCHEDULE_YEARS)
         show_schedule = args.get("show_schedule", False)
         monthly_rate = annual_rate / 12
         n = years * 12
@@ -518,7 +567,7 @@ def dispatch(name: str, args: dict) -> str:
 
     elif name == "currency_format":
         amount = float(args["amount"])
-        decimals = int(args.get("decimals", 2))
+        decimals = bounded_integer(args.get("decimals", 2), "decimals", 0, MAX_DECIMALS)
         return f"${fmt(amount, decimals)}"
 
     else:

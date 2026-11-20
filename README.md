@@ -21,6 +21,25 @@ uv tool install finance-calc-mcp
 
 ## Use as an MCP Server
 
+### Security update (0.2.1)
+
+Version 0.2.1 replaces Python expression execution with a restricted math
+interpreter, bounds calculation/output sizes, and updates vulnerable dependencies.
+Older releases should be upgraded once 0.2.1 is published:
+
+```bash
+uv tool upgrade finance-calc-mcp
+# or: pip install --upgrade 'finance-calc-mcp>=0.2.1'
+
+# Refresh uvx's cached environment, including dependencies
+uvx --upgrade 'finance-calc-mcp>=0.2.1' calc "185000 * 0.21"
+```
+
+For MCP configurations, use `uvx --upgrade 'finance-calc-mcp>=0.2.1'`
+(JSON args: `["--upgrade", "finance-calc-mcp>=0.2.1"]`), then restart the client.
+Until the release is published, maintainers can test this checkout with
+`uv run --locked finance-calc-mcp`.
+
 ### Prerequisites
 
 Install [uv](https://docs.astral.sh/uv/) if you don't have it:
@@ -100,6 +119,12 @@ When connected as an MCP server, Claude gets these tools:
 
 Evaluate a financial/business math expression. Supports `+`, `-`, `*`, `/`, `**`, `%`, parentheses, and functions: `round()`, `abs()`, `max()`, `min()`, `sum()`, `sqrt()`, `log()`, `floor()`, `ceil()`, `pow()`.
 
+Expressions may use `pi`, `e`, and numeric lists/tuples for aggregate functions
+(for example, `sum([1, 2, 3])`). `pow()` accepts two arguments. Python attributes,
+indexing, comprehensions, strings, and arbitrary function calls are rejected.
+Expressions are limited to 4,096 characters, 256 syntax-tree nodes, and 32 nesting
+levels; results and intermediate numbers must be finite real numbers.
+
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `expression` | string | yes | Math expression to evaluate |
@@ -137,7 +162,7 @@ Calculate a depreciation schedule (straight-line or double-declining balance).
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `asset_cost` | number | yes | Asset purchase price |
-| `useful_life` | number | yes | Useful life in years |
+| `useful_life` | integer | yes | Useful life in years (1–100) |
 | `salvage_value` | number | no | Salvage/residual value (default 0) |
 | `method` | string | no | `straight_line` (default) or `double_declining` |
 
@@ -158,7 +183,7 @@ Generate a loan amortization summary: monthly payment, total interest paid, and 
 |---|---|---|---|
 | `principal` | number | yes | Loan principal |
 | `annual_rate_pct` | number | yes | Annual interest rate as percent (e.g. 6.5) |
-| `term_years` | number | yes | Loan term in years |
+| `term_years` | integer | yes | Loan term in years (1–100) |
 | `show_schedule` | boolean | no | Return full amortization table (default false) |
 
 ### `percent_change`
@@ -187,7 +212,7 @@ Format a number as a USD currency string.
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `amount` | number | yes | Amount to format |
-| `decimals` | integer | no | Decimal places (default 2) |
+| `decimals` | integer | no | Decimal places, 0–20 (default 2) |
 
 ---
 
@@ -267,3 +292,19 @@ Interest/Dollar: 127.54%
 ## License
 
 MIT
+
+## Development checks
+
+```bash
+uv sync --locked
+uv run --locked python -m unittest discover -s tests -v
+uv export --locked --no-dev --no-emit-project -o /tmp/finance-calc-requirements.txt
+uvx pip-audit -r /tmp/finance-calc-requirements.txt --no-deps --disable-pip
+uv build
+```
+
+CI runs tests and dependency audits on Python 3.10 and 3.14 on pushes, pull
+requests, and weekly. Dependabot checks the uv lockfile and GitHub Actions weekly.
+Dependency security floors in `pyproject.toml` protect published installs;
+`uv.lock` records the tested versions for source checkouts. Keep both updated.
+The server uses stdio only; it does not expose an HTTP endpoint.
