@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 dependencies = [
-    "mcp>=1.30.0,<2.0.0",
+    "mcp>=1.30.0,<3.0.0",
     "jsonschema>=4.26.0",
     # Security floors also apply to pip/uvx installs, which do not use uv.lock.
     "anyio>=4.14.2",
