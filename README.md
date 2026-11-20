@@ -308,3 +308,20 @@ requests, and weekly. Dependabot checks the uv lockfile and GitHub Actions weekl
 Dependency security floors in `pyproject.toml` protect published installs;
 `uv.lock` records the tested versions for source checkouts. Keep both updated.
 The server uses stdio only; it does not expose an HTTP endpoint.
+
+### Publishing a release
+
+The `Publish to PyPI` workflow builds and audits a version tag, then publishes
+the distributions using PyPI trusted publishing. Its publishing job uses the
+GitHub environment `pypi`; no long-lived API token is needed.
+
+Configure the project's PyPI trusted publisher with owner `FellowTraveler`,
+repository `finance-calc-mcp`, workflow `publish.yml`, and environment `pypi`.
+After CI passes, create and push a tag matching the package version, then run:
+
+```bash
+gh workflow run publish.yml -f tag=v0.2.1
+```
+
+Verify the workflow succeeds and the new version is available on PyPI before
+announcing the release.
